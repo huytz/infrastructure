@@ -26,4 +26,14 @@ output "pods_ip_range" {
 output "services_ip_range" {
   description = "The IP range for GKE services"
   value       = "services"
+}
+
+output "router_name" {
+  description = "The name of the Cloud Router"
+  value       = google_compute_router.gke_router.name
+}
+
+output "nat_name" {
+  description = "The name of the Cloud NAT gateway"
+  value       = google_compute_router_nat.gke_nat.name
 } 
