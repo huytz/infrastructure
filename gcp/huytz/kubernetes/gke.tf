@@ -18,6 +18,14 @@ module "gke" {
   cloudrun                   = false
   dns_cache                  = false
 
+  # Enable public access to the cluster
+  master_authorized_networks = [
+    {
+      cidr_block   = "0.0.0.0/0"
+      display_name = "All"
+    },
+  ]
+
   node_pools = [
     {
       name                      = "default-node-pool"
