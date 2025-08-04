@@ -12,7 +12,7 @@ module "gke" {
   network_policy             = false
   horizontal_pod_autoscaling = true
   filestore_csi_driver       = false
-  enable_private_endpoint    = true
+  enable_private_endpoint    = false
   enable_private_nodes       = true
   istio                      = false
   cloudrun                   = false
@@ -24,7 +24,7 @@ module "gke" {
       machine_type              = "e2-medium"
       node_locations            = "us-central1-a"
       min_count                 = 1
-      max_count                 = 100
+      max_count                 = 4
       local_ssd_count           = 0
       spot                      = false
       local_ssd_ephemeral_count = 0
