@@ -1,3 +1,11 @@
+locals {
+  subnet_configurations = var.subnet_configurations
+  sre_team_subnet       = local.subnet_configurations["sre-team"]
+  subnet_name           = local.sre_team_subnet.name
+  pods_range            = local.sre_team_subnet.secondary_ranges["sre-team-pods-range"].ip_cidr_range
+  services_range        = local.sre_team_subnet.secondary_ranges["sre-team-services-range"].ip_cidr_range
+}
+
 module "gke" {
   source                     = "terraform-google-modules/kubernetes-engine/google//modules/beta-private-cluster"
   project_id                 = var.project_id
@@ -5,9 +13,9 @@ module "gke" {
   region                     = "us-central1"
   zones                      = ["us-central1-a"]
   network                    = var.network_name
-  subnetwork                 = var.subnet_name
-  ip_range_pods              = var.pods_ip_range
-  ip_range_services          = var.services_ip_range
+  subnetwork                 = local.subnet_name
+  ip_range_pods              = local.pods_range
+  ip_range_services          = local.services_range
   http_load_balancing        = false
   network_policy             = false
   horizontal_pod_autoscaling = true

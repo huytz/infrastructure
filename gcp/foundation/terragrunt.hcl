@@ -8,4 +8,5 @@ locals {
 
 inputs = {
   billing_account_id = local.root_config.locals.billing_account_id
+  organization_id    = local.root_config.locals.organization_id
 }

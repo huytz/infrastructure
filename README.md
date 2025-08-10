@@ -1,6 +1,6 @@
 # Infrastructure as Code with Terragrunt
 
-This repository contains the infrastructure configuration for the huytz project using Terraform and Terragrunt.
+This repository contains the infrastructure configuration for the huytz project using Terraform and Terragrunt, implementing a multi-environment GCP infrastructure with dynamic CIDR allocation.
 
 ## Prerequisites
 
@@ -15,10 +15,11 @@ Before using this repository, ensure you have the following installed:
 
 ### 1. Set Environment Variables
 
-Set your GCP billing account ID as an environment variable:
+Set your GCP billing account ID and organization ID as environment variables:
 
 ```bash
 export BILLING_ACCOUNT_ID="your-billing-account-id"
+export ORGANIZATION_ID="your-organization-id"
 ```
 
 You can find your billing account ID in the [Google Cloud Console](https://console.cloud.google.com/billing) or by running:
@@ -47,22 +48,46 @@ gcloud config set project YOUR_PROJECT_ID
 infrastructure/
 ├── root.hcl                    # Root Terragrunt configuration
 ├── gcp/
-│   └── huytz/
-│       ├── terragrunt.hcl      # GCP project configuration
-│       ├── project.tf          # GCP project resource
-│       ├── apis.tf             # Google APIs to enable
-│       ├── variables.tf        # Input variables
-│       ├── outputs.tf          # Output values
-│       ├── network/
-│       │   ├── terragrunt.hcl  # Network configuration
-│       │   ├── main.tf         # VPC network and subnet resources
-│       │   ├── variables.tf    # Network variables
-│       │   └── outputs.tf      # Network outputs
-│       └── kubernetes/
-│           ├── terragrunt.hcl  # Kubernetes configuration
-│           ├── gke.tf          # GKE cluster configuration
-│           └── variables.tf    # Kubernetes variables
+│   ├── foundation/             # Foundation infrastructure
+│   │   ├── terragrunt.hcl      # Foundation configuration
+│   │   ├── project.tf          # GCP project resource
+│   │   ├── networks.tf         # VPC network and dynamic subnets
+│   │   ├── cloud-nat.tf        # Cloud NAT configuration
+│   │   ├── variables.tf        # Input variables
+│   │   ├── outputs.tf          # Output values
+│   │   └── DYNAMIC_CIDR.md     # CIDR allocation documentation
+│   └── sre-team/               # SRE Team environment
+│       ├── terragrunt.hcl      # SRE Team project configuration
+│       ├── project.tf          # SRE Team GCP project
+│       ├── variables.tf        # SRE Team variables
+│       ├── outputs.tf          # SRE Team outputs
+│       └── gke/                # GKE cluster
+│           ├── terragrunt.hcl  # GKE configuration
+│           ├── main.tf         # GKE cluster resources
+│           └── variables.tf    # GKE variables
 ```
+
+## Architecture Overview
+
+### Foundation Module
+The foundation module creates the core infrastructure:
+- **GCP Project**: Creates the foundation project with billing account association
+- **VPC Network**: Creates a shared VPC network with auto-created subnets disabled
+- **Dynamic Subnets**: Automatically generates subnets for all environments using a scalable CIDR allocation system
+- **Cloud NAT**: Provides internet access for private instances
+- **Google APIs**: Enables all necessary APIs for the infrastructure
+
+### SRE Team Module
+The SRE team module creates environment-specific resources:
+- **GCP Project**: Creates a separate project for the SRE team
+- **GKE Cluster**: Deploys a private GKE cluster using the foundation network infrastructure
+
+### Dynamic CIDR Allocation
+The system uses a dynamic CIDR allocation strategy that:
+- Automatically generates subnet configurations for multiple environments
+- Follows GCP best practices with proper IP range sizing
+- Uses /20 secondary ranges for pods and services (4,096 IPs each)
+- Provides a scalable foundation for adding new environments
 
 ## Usage
 
@@ -77,18 +102,18 @@ terragrunt run-all apply   # Apply changes
 
 ### Deploy Individual Components
 
-#### Deploy GCP Project and APIs
+#### Deploy Foundation Infrastructure
 
 ```bash
-cd gcp/huytz
+cd gcp/foundation
 terragrunt plan
 terragrunt apply
 ```
 
-#### Deploy Network Infrastructure
+#### Deploy SRE Team Environment
 
 ```bash
-cd gcp/huytz/network
+cd gcp/sre-team
 terragrunt plan
 terragrunt apply
 ```
@@ -96,7 +121,7 @@ terragrunt apply
 #### Deploy GKE Cluster
 
 ```bash
-cd gcp/huytz/kubernetes
+cd gcp/sre-team/gke
 terragrunt plan
 terragrunt apply
 ```
@@ -112,54 +137,60 @@ terragrunt run-all destroy
 Or destroy individual components:
 
 ```bash
-cd gcp/huytz/kubernetes
+cd gcp/sre-team/gke
 terragrunt destroy
 
-cd ../network
+cd ../..
 terragrunt destroy
 
-cd ..
+cd ../foundation
 terragrunt destroy
 ```
 
 ## Configuration
 
-### Billing Account
+### Environment Variables
 
-The billing account ID is configured via the `BILLING_ACCOUNT_ID` environment variable. This is used to associate the GCP project with your billing account.
+- `BILLING_ACCOUNT_ID`: Required for associating projects with billing
+- `ORGANIZATION_ID`: Required for project creation and organization policies
 
-### GCP Project
+### Foundation Project
 
-The project is automatically created with a unique ID based on the `huytz` prefix and a random suffix.
+The foundation project is automatically created with a unique ID and includes:
+- Billing account association
+- All necessary Google APIs enabled
+- Shared VPC network infrastructure
+- Cloud NAT for private instance internet access
 
 ### Network Infrastructure
 
-The network module creates:
-- **VPC Network**: `gke-network` with auto-created subnets disabled
-- **Subnet**: `gke-subnet` with proper IP ranges:
-  - Primary range: `10.0.0.0/24` for nodes
-  - Secondary range for pods: `10.1.0.0/16`
-  - Secondary range for services: `10.2.0.0/16`
+The foundation network module creates:
+- **VPC Network**: Shared network with auto-created subnets disabled
+- **Dynamic Subnets**: Automatically generated for all environments:
+  - **sre-team-subnet**: `10.0.1.0/24` for nodes
+  - **sre-team-pods-range**: `10.0.16.0/20` for pods (4,096 IPs)
+  - **sre-team-services-range**: `10.0.32.0/20` for services (4,096 IPs)
 
 ### GKE Cluster
 
 The GKE cluster is configured with:
 - Private cluster with private nodes
 - Default node pool with e2-medium instances
-- Auto-scaling enabled (1-100 nodes)
-- Service account for node pool
-- Uses the custom VPC network and subnet
+- Auto-scaling enabled (1-4 nodes)
+- Uses the foundation VPC network and subnet
+- Proper secondary IP ranges for pods and services
+- Master authorized networks configured for access
 
 ## Dependencies
 
 The infrastructure follows this dependency order:
-1. **GCP Project** - Creates the project and enables APIs
-2. **Network** - Creates VPC network and subnet (depends on project)
-3. **GKE Cluster** - Creates the Kubernetes cluster (depends on project and network)
+1. **Foundation** - Creates shared VPC network and enables APIs
+2. **SRE Team Project** - Creates environment-specific project
+3. **GKE Cluster** - Creates the Kubernetes cluster (depends on foundation network)
 
 ## APIs Enabled
 
-The following Google APIs are automatically enabled:
+The following Google APIs are automatically enabled in the foundation project:
 
 - `container.googleapis.com` - Kubernetes Engine API
 - `compute.googleapis.com` - Compute Engine API
@@ -169,48 +200,72 @@ The following Google APIs are automatically enabled:
 - `dns.googleapis.com` - Cloud DNS API
 - `logging.googleapis.com` - Cloud Logging API
 - `monitoring.googleapis.com` - Cloud Monitoring API
-- `artifactregistry.googleapis.com` - Artifact Registry API
+
+## Adding New Environments
+
+To add a new environment:
+
+1. **Update Foundation Module**: Add the new environment to the `environments` map in `gcp/foundation/networks.tf`
+2. **Create Environment Module**: Create a new directory under `gcp/` for the environment
+3. **Configure Dependencies**: Set up terragrunt dependencies to use the foundation network
+
+Example environment addition:
+```hcl
+# In gcp/foundation/networks.tf
+environments = {
+  sre-team = {
+    description = "SRE Team Environment"
+    cidr_base   = "10.0"
+  }
+  new-env = {
+    description = "New Environment"
+    cidr_base   = "10.1"
+  }
+}
+```
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Billing Account Not Set**
+1. **Environment Variables Not Set**
    ```
-   Error: billing_account_id is required
+   Error: Required environment variable BILLING_ACCOUNT_ID - not found
    ```
-   Solution: Set the `BILLING_ACCOUNT_ID` environment variable.
+   Solution: Set the required environment variables.
 
-2. **Kubernetes Engine API Not Enabled**
+2. **Foundation Dependencies**
    ```
-   Error: Kubernetes Engine API has not been used in project...
+   Error: This object does not have an attribute named "subnet_configurations"
    ```
-   Solution: Ensure the GCP project and APIs are deployed before the GKE cluster.
+   Solution: Ensure the foundation module is deployed before dependent modules.
 
-3. **Network Dependencies**
+3. **GCP Permissions**
    ```
-   Error: Pod secondary range not found...
+   Error: Permission denied on resource project
    ```
-   Solution: Ensure the network module is deployed before the GKE cluster.
+   Solution: Ensure proper GCP authentication and permissions.
 
-4. **Authentication Issues**
+4. **Network Dependencies**
    ```
-   Error: google: could not find default credentials
+   Error: Pod secondary range not found
    ```
-   Solution: Run `gcloud auth application-default login`.
+   Solution: Ensure the foundation network module is deployed before GKE.
 
 ### Getting Help
 
 - Check the [Terragrunt documentation](https://terragrunt.gruntwork.io/docs/)
 - Review the [Terraform Google provider documentation](https://registry.terraform.io/providers/hashicorp/google/latest/docs)
 - Check the [GKE module documentation](https://github.com/terraform-google-modules/terraform-google-kubernetes-engine)
+- Review the `DYNAMIC_CIDR.md` file for CIDR allocation details
 
 ## Contributing
 
 1. Make changes to the Terraform configuration files
 2. Test your changes with `terragrunt plan`
 3. Apply changes with `terragrunt apply`
-4. Commit and push your changes
+4. Update documentation as needed
+5. Commit and push your changes
 
 ## License
 

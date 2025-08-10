@@ -25,4 +25,6 @@ EOF
 
 locals {
   billing_account_id = get_env("BILLING_ACCOUNT_ID")
+  organization_id    = get_env("ORGANIZATION_ID")
 }
+

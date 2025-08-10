@@ -1,3 +1,14 @@
+locals {
+  # Get project name from directory structure
+  project_name = basename(path.cwd)
+}
+resource "google_project" "project" {
+  name            = local.project_name
+  project_id      = "${local.project_name}-${random_id.project_suffix.hex}"
+  billing_account = var.billing_account_id
+  org_id          = var.organization_id
+}
+
 # List of required Google APIs
 locals {
   required_apis = [
@@ -17,6 +28,16 @@ locals {
 resource "google_project_service" "apis" {
   for_each = toset(local.required_apis)
 
-  project = google_project.huytz.project_id
+  project = google_project.project.project_id
   service = each.value
+}
+
+resource "random_id" "project_suffix" {
+  byte_length = 4
+}
+
+
+resource "google_compute_shared_vpc_service_project" "service_project_attach" {
+  host_project    = var.foundation_project_id
+  service_project = google_project.project.project_id
 }
