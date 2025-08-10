@@ -86,8 +86,10 @@ The SRE team module creates environment-specific resources:
 The system uses a dynamic CIDR allocation strategy that:
 - Automatically generates subnet configurations for multiple environments
 - Follows GCP best practices with proper IP range sizing
+- Uses /24 primary subnets (256 IPs) for nodes
 - Uses /20 secondary ranges for pods and services (4,096 IPs each)
-- Provides a scalable foundation for adding new environments
+- Provides predictable IP allocation with automatic calculation
+- Enables easy scaling by adding environments to the configuration map
 
 ## Usage
 
@@ -167,19 +169,29 @@ The foundation project is automatically created with a unique ID and includes:
 The foundation network module creates:
 - **VPC Network**: Shared network with auto-created subnets disabled
 - **Dynamic Subnets**: Automatically generated for all environments:
-  - **sre-team-subnet**: `10.0.1.0/24` for nodes
+  - **sre-team-subnet**: `10.0.1.0/24` for nodes (256 IPs)
   - **sre-team-pods-range**: `10.0.16.0/20` for pods (4,096 IPs)
   - **sre-team-services-range**: `10.0.32.0/20` for services (4,096 IPs)
+- **Flow Logs**: Enabled for network monitoring with 5-second aggregation intervals
+- **Cloud NAT**: Provides internet access for private instances
 
 ### GKE Cluster
 
 The GKE cluster is configured with:
-- Private cluster with private nodes
-- Default node pool with e2-medium instances
-- Auto-scaling enabled (1-4 nodes)
-- Uses the foundation VPC network and subnet
-- Proper secondary IP ranges for pods and services
-- Master authorized networks configured for access
+- **Cluster Name**: `gke-test`
+- **Region**: `us-central1` with single zone deployment (`us-central1-a`)
+- **Private Cluster**: Private nodes with public control plane access
+- **Node Pool**: 
+  - Machine type: `e2-medium`
+  - Auto-scaling: 1-4 nodes
+  - Disk: 100GB SSD
+  - OS: Container-Optimized OS with containerd
+- **Network Features**:
+  - Uses foundation VPC network and subnet
+  - Proper secondary IP ranges for pods and services
+  - Master authorized networks: `0.0.0.0/0` (all IPs)
+- **Disabled Features**: HTTP load balancing, network policy, Istio, Cloud Run, DNS cache
+- **Enabled Features**: Horizontal pod autoscaling, auto-repair, auto-upgrade
 
 ## Dependencies
 
@@ -200,6 +212,13 @@ The following Google APIs are automatically enabled in the foundation project:
 - `dns.googleapis.com` - Cloud DNS API
 - `logging.googleapis.com` - Cloud Logging API
 - `monitoring.googleapis.com` - Cloud Monitoring API
+
+These APIs are required for:
+- GKE cluster creation and management
+- VPC network and subnet operations
+- Cloud NAT and routing
+- IAM service account management
+- Monitoring and logging integration
 
 ## Adding New Environments
 
@@ -223,6 +242,21 @@ environments = {
   }
 }
 ```
+
+This will automatically generate:
+- **Primary subnet**: `new-env-subnet` with CIDR `10.1.1.0/24`
+- **Pods range**: `new-env-pods-range` with CIDR `10.1.16.0/20`
+- **Services range**: `new-env-services-range` with CIDR `10.1.32.0/20`
+
+### CIDR Allocation Strategy
+
+The system uses a predictable CIDR allocation pattern:
+- **Primary subnets**: `/24` (256 IPs) for nodes
+- **Secondary ranges**: `/20` (4,096 IPs) for pods and services
+- **Environment separation**: Each environment gets its own `10.x.x.x` range
+- **Automatic calculation**: Secondary ranges are calculated using offsets (16, 32, etc.)
+
+For detailed CIDR planning information, see `gcp/foundation/DYNAMIC_CIDR.md`.
 
 ## Troubleshooting
 
@@ -257,7 +291,8 @@ environments = {
 - Check the [Terragrunt documentation](https://terragrunt.gruntwork.io/docs/)
 - Review the [Terraform Google provider documentation](https://registry.terraform.io/providers/hashicorp/google/latest/docs)
 - Check the [GKE module documentation](https://github.com/terraform-google-modules/terraform-google-kubernetes-engine)
-- Review the `DYNAMIC_CIDR.md` file for CIDR allocation details
+- Review the `gcp/foundation/DYNAMIC_CIDR.md` file for detailed CIDR allocation information
+- Check the [GCP VPC documentation](https://cloud.google.com/vpc/docs) for network best practices
 
 ## Contributing
 
