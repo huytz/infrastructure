@@ -5,13 +5,14 @@ resource "google_compute_network" "network" {
   project                 = google_project.project.project_id
 }
 
-# Define comprehensive subnet configurations for all environments and regions
+# Define environments for subnet generator
 locals {
   # Define all environments
   environments = {
     sre-team = {
       description = "SRE Team Environment"
       cidr_base   = "10.0"
+      region      = var.region != "" ? var.region : "us-central1"
     }
   }
 
@@ -28,49 +29,21 @@ locals {
       cidr_size         = 20
     }
   }
+}
 
-  # Generate subnet configurations dynamically with map-based secondary ranges
-  subnet_configs = {
-    for env_key, env_config in local.environments : env_key => {
-      name          = "${env_key}-subnet"
-      ip_cidr_range = "${env_config.cidr_base}.1.0/24"
-      region        = "us-central1"
-      environment   = env_key
-      description   = env_config.description
+# Subnet Generator Module
+module "subnet_generator" {
+  source = "../../modules/gcp/subnet-generator"
 
-      # Generate secondary IP ranges as a map for easier access
-      # Use proper /20 boundaries: 10.0.0.0/20, 10.0.16.0/20, 10.0.32.0/20, etc.
-      secondary_ranges = {
-        for range_key, range_config in local.secondary_ranges : range_key => {
-          range_name    = "${env_key}-${range_config.range_name_suffix}"
-          ip_cidr_range = "${env_config.cidr_base}.${range_config.cidr_offset * 16}.0/${range_config.cidr_size}"
-        }
-      }
-    }
-  }
-
-  # Flatten subnet configurations for easier iteration
-  flattened_subnets = [
-    for env_key, subnet_config in local.subnet_configs : {
-      key              = env_key
-      name             = subnet_config.name
-      ip_cidr_range    = subnet_config.ip_cidr_range
-      region           = subnet_config.region
-      environment      = subnet_config.environment
-      description      = subnet_config.description
-      secondary_ranges = subnet_config.secondary_ranges
-    }
-  ]
-
-  # Convert to map for for_each
-  subnet_map = {
-    for subnet in local.flattened_subnets : subnet.key => subnet
-  }
+  environments             = local.environments
+  secondary_ranges         = local.secondary_ranges
+  primary_subnet_cidr_size = 24
+  primary_subnet_offset    = 1
 }
 
 # Create subnets dynamically for all environments and regions
 resource "google_compute_subnetwork" "dynamic_subnets" {
-  for_each = local.subnet_map
+  for_each = module.subnet_generator.subnets
 
   name          = each.value.name
   ip_cidr_range = each.value.ip_cidr_range

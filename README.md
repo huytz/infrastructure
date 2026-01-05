@@ -1,46 +1,50 @@
 # Infrastructure as Code with Terragrunt
 
-This repository contains the infrastructure configuration for the huytz project using Terraform and Terragrunt, implementing a multi-environment GCP infrastructure with dynamic CIDR allocation.
+Multi-cloud infrastructure using Terraform and Terragrunt:
+- **GCP**: Multi-project infrastructure with Shared VPC
+- **AWS**: Complete Landing Zone architecture with Platform Landing Zone (PLZ) and Workload Landing Zone (WLZ)
 
 ## Prerequisites
 
-Before using this repository, ensure you have the following installed:
-
-- [Terraform](https://www.terraform.io/downloads.html) (>= 1.5.7)
+- [Terraform](https://www.terraform.io/downloads.html) >= 1.5.7
 - [Terragrunt](https://terragrunt.gruntwork.io/docs/getting-started/install/)
-- [Google Cloud SDK](https://cloud.google.com/sdk/docs/install)
-- [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/)
+- [AWS CLI](https://aws.amazon.com/cli/) (for AWS)
+- [Google Cloud SDK](https://cloud.google.com/sdk/docs/install) (for GCP)
 
-## Setup
+## Quick Start
 
 ### 1. Set Environment Variables
 
-Set your GCP billing account ID and organization ID as environment variables:
-
+#### AWS Credentials
 ```bash
+export AWS_REGION="us-east-1"
+export AWS_ACCESS_KEY_ID="your-access-key"
+export AWS_SECRET_ACCESS_KEY="your-secret-key"
+export AWS_SESSION_TOKEN="your-session-token"  # Optional, for temporary credentials
+```
+
+#### GCP Credentials
+```bash
+export GCP_PROJECT_ID="your-project-id"
+export GCP_REGION="us-central1"
+export GOOGLE_CREDENTIALS='{"type":"service_account",...}'  # Or use GOOGLE_APPLICATION_CREDENTIALS
 export BILLING_ACCOUNT_ID="your-billing-account-id"
 export ORGANIZATION_ID="your-organization-id"
 ```
 
-You can find your billing account ID in the [Google Cloud Console](https://console.cloud.google.com/billing) or by running:
+### 2. Deploy Infrastructure
 
 ```bash
-gcloud billing accounts list
+# Preview changes
+terragrunt run-all plan
+
+# Apply changes
+terragrunt run-all apply
 ```
 
-### 2. Authenticate with Google Cloud
-
-```bash
-gcloud auth application-default login
-```
-
-### 3. Set your GCP Project (Optional)
-
-If you want to work with a specific GCP project:
-
-```bash
-gcloud config set project YOUR_PROJECT_ID
-```
+**Deployment Order:**
+- **AWS**: Organizations → Logging Account → Security Account → Network Account → Management Account → Workload Accounts
+- **GCP**: Foundation → SRE Team → GKE
 
 ## Project Structure
 
@@ -48,260 +52,264 @@ gcloud config set project YOUR_PROJECT_ID
 infrastructure/
 ├── root.hcl                    # Root Terragrunt configuration
 ├── gcp/
-│   ├── foundation/             # Foundation infrastructure
-│   │   ├── terragrunt.hcl      # Foundation configuration
-│   │   ├── project.tf          # GCP project resource
-│   │   ├── networks.tf         # VPC network and dynamic subnets
-│   │   ├── cloud-nat.tf        # Cloud NAT configuration
-│   │   ├── variables.tf        # Input variables
-│   │   ├── outputs.tf          # Output values
-│   │   └── DYNAMIC_CIDR.md     # CIDR allocation documentation
-│   └── sre-team/               # SRE Team environment
-│       ├── terragrunt.hcl      # SRE Team project configuration
-│       ├── project.tf          # SRE Team GCP project
-│       ├── variables.tf        # SRE Team variables
-│       ├── outputs.tf          # SRE Team outputs
+│   ├── foundation/             # Foundation project (Shared VPC)
+│   └── sre-team/               # SRE Team project
 │       └── gke/                # GKE cluster
-│           ├── terragrunt.hcl  # GKE configuration
-│           ├── main.tf         # GKE cluster resources
-│           └── variables.tf    # GKE variables
+└── aws/
+    ├── platform/               # Platform Landing Zone (PLZ)
+    │   ├── management-account/ # Organizations, SCPs, Security Controls
+    │   ├── security-account/   # GuardDuty, Security Hub Admin
+    │   ├── logging-account/    # Centralized Logs (CloudTrail, Config)
+    │   └── network-account/    # Network hub (Transit Gateway)
+    ├── workloads/              # Workload Landing Zone (WLZ)
+    │   └── sre-account/        # Workload account
+    └── organizations/          # AWS Organizations structure
 ```
 
-## Architecture Overview
+## Architecture Comparison: AWS vs GCP
 
-### Foundation Module
-The foundation module creates the core infrastructure:
-- **GCP Project**: Creates the foundation project with billing account association
-- **VPC Network**: Creates a shared VPC network with auto-created subnets disabled
-- **Dynamic Subnets**: Automatically generates subnets for all environments using a scalable CIDR allocation system
-- **Cloud NAT**: Provides internet access for private instances
-- **Google APIs**: Enables all necessary APIs for the infrastructure
+This infrastructure follows the official landing zone best practices from both cloud providers. For detailed guidance, refer to:
+- [AWS Landing Zone Guide](https://docs.aws.amazon.com/prescriptive-guidance/latest/migration-aws-environment/building-landing-zones.html)
+- [GCP Landing Zone Guide](https://docs.cloud.google.com/architecture/landing-zones)
 
-### SRE Team Module
-The SRE team module creates environment-specific resources:
-- **GCP Project**: Creates a separate project for the SRE team
-- **GKE Cluster**: Deploys a private GKE cluster using the foundation network infrastructure
+### Overview
 
-### Dynamic CIDR Allocation
-The system uses a dynamic CIDR allocation strategy that:
-- Automatically generates subnet configurations for multiple environments
-- Follows GCP best practices with proper IP range sizing
-- Uses /24 primary subnets (256 IPs) for nodes
-- Uses /20 secondary ranges for pods and services (4,096 IPs each)
-- Provides predictable IP allocation with automatic calculation
-- Enables easy scaling by adding environments to the configuration map
+| Aspect | AWS | GCP |
+|--------|-----|-----|
+| **Isolation Unit** | AWS Account | GCP Project |
+| **Network Model** | VPC per Account | Shared VPC (Host/Service Projects) |
+| **Connectivity** | Transit Gateway | Shared VPC Network |
+| **Internet Gateway** | Centralized in Network Account | Cloud NAT (in Foundation) |
+| **DNS** | Route53 Private Hosted Zones | Cloud DNS (centralized in foundation) |
+| **Billing** | Per Account | Per Project |
 
-## Usage
+### AWS Architecture
 
-### Deploy Everything
+**Platform Landing Zone (PLZ)** - Foundational Infrastructure:
+```
+Management Account
+├── AWS Organizations
+├── Service Control Policies (SCPs)
+└── Security Controls (CloudTrail, GuardDuty, Config, Security Hub)
 
-To deploy the entire infrastructure:
+Security Account
+├── GuardDuty Admin
+└── Security Hub Admin
 
-```bash
-terragrunt run-all plan    # Preview changes
-terragrunt run-all apply   # Apply changes
+Logging Account
+├── CloudTrail Logs (S3)
+├── Config Logs (S3)
+└── VPC Flow Logs (CloudWatch)
+
+Network Account (10.0.0.0/16) - Hub
+├── VPC with Public & Private Subnets
+├── Internet Gateway (IGW)
+├── NAT Gateways (one per AZ)
+├── Transit Gateway (Central Hub)
+└── Route53 Private Zone (network.internal)
 ```
 
-### Deploy Individual Components
-
-#### Deploy Foundation Infrastructure
-
-```bash
-cd gcp/foundation
-terragrunt plan
-terragrunt apply
+**Workload Landing Zone (WLZ)** - Application Accounts:
+```
+Workload Accounts (10.1.0.0/16, 10.2.0.0/16, ...) - Spokes
+├── VPC with Private Subnets ONLY
+├── Transit Gateway Attachment
+├── Routes: 0.0.0.0/0 → Transit Gateway → Network Account NAT
+└── Route53 Private Zone (account.internal)
 ```
 
-#### Deploy SRE Team Environment
+**Key Characteristics:**
+- **Platform Accounts**: Management, Security, Logging, Network (foundational services)
+- **Workload Accounts**: Application-specific accounts (Dev, Test, Prod)
+- Separate VPCs per account with isolated CIDR blocks
+- Transit Gateway as central hub connecting all VPCs
+- Centralized internet access (only network account has IGW/NAT)
+- Workload accounts have NO public subnets or internet gateways
+- Organization-wide security controls (CloudTrail, GuardDuty, Config, Security Hub)
+- Service Control Policies (SCPs) enforce guardrails across all accounts
 
-```bash
-cd gcp/sre-team
-terragrunt plan
-terragrunt apply
+### GCP Architecture
+
+```
+Foundation Project (Host Project)
+├── Shared VPC Network
+├── Subnets (with secondary ranges for GKE)
+├── Cloud NAT (for internet access)
+└── Cloud DNS Private Zone (foundation.internal - centralized)
+
+Workload Projects (Service Projects)
+├── No VPC (uses Shared VPC)
+├── Shared VPC Attachment
+├── Resources use foundation's network
+└── Access to foundation's Cloud DNS (automatic via Shared VPC)
 ```
 
-#### Deploy GKE Cluster
+**Key Characteristics:**
+- Single Shared VPC network shared across multiple projects
+- Host/Service model: Foundation = Host, Workload = Service projects
+- Direct network sharing via Shared VPC (no Transit Gateway)
+- All network resources centralized in foundation project
 
-```bash
-cd gcp/sre-team/gke
-terragrunt plan
-terragrunt apply
+### Connectivity Patterns
+
+#### AWS: Transit Gateway
+
+**How it works:**
+1. Network account creates Transit Gateway
+2. Each workload account attaches VPC to Transit Gateway
+3. Route tables configured to route traffic via Transit Gateway
+4. Internet traffic routes: Workload → Transit Gateway → Network Account NAT → Internet
+
+**Benefits:**
+- ✅ True account isolation (separate VPCs)
+- ✅ Centralized internet access
+- ✅ Hub-and-spoke topology
+- ✅ Cross-account routing via Transit Gateway
+
+**Challenges:**
+- ⚠️ Transit Gateway costs (data processing, attachments)
+- ⚠️ More complex routing configuration
+- ⚠️ Requires route table management
+
+#### GCP: Shared VPC
+
+**How it works:**
+1. Foundation project creates Shared VPC network
+2. Workload projects attach as service projects
+3. Resources in service projects use foundation's network
+4. Internet access via Cloud NAT in foundation project
+5. Cloud DNS automatically shared via Shared VPC
+
+**Benefits:**
+- ✅ Simpler architecture (no Transit Gateway needed)
+- ✅ Lower cost (no Transit Gateway charges)
+- ✅ Direct network sharing
+- ✅ Easier to manage (single network)
+- ✅ Automatic DNS sharing
+
+**Challenges:**
+- ⚠️ Less isolation (shared network)
+- ⚠️ Network changes affect all projects
+- ⚠️ Requires careful subnet planning
+
+### Internet Access
+
+#### AWS
+```
+Internet → Internet Gateway (Network Account) → Public Subnets → 
+NAT Gateways → Transit Gateway → Workload Account VPCs → Private Subnets
 ```
 
-### Destroy Infrastructure
+**Pattern:**
+- Network account: Public subnets + NAT Gateways
+- Workload accounts: Private subnets only
+- All internet traffic routes through Transit Gateway
 
-To destroy all resources:
-
-```bash
-terragrunt run-all destroy
+#### GCP
+```
+Internet → Cloud NAT (Foundation Project) → Shared VPC Network → Service Project Resources
 ```
 
-Or destroy individual components:
+**Pattern:**
+- Foundation project: Cloud NAT for internet access
+- Workload projects: No NAT needed (use foundation's NAT)
+- Direct network access (no Transit Gateway)
 
-```bash
-cd gcp/sre-team/gke
-terragrunt destroy
+### DNS Management
 
-cd ../..
-terragrunt destroy
+#### AWS: Route53 Private Hosted Zones
 
-cd ../foundation
-terragrunt destroy
-```
+- **Network Account**: Centralized zone `network.internal`
+- **Workload Accounts**: Account-specific zones `{account-name}.internal`
+- **Cross-Account DNS**: Requires `aws_route53_zone_association` resource and IAM permissions
 
-## Configuration
+#### GCP: Cloud DNS
 
-### Environment Variables
+- **Foundation Project**: Centralized private DNS zone `foundation.internal`
+- **Workload Projects**: Automatically have access via Shared VPC
+- **Cross-Project DNS**: Automatic via Shared VPC, no additional configuration needed
 
-- `BILLING_ACCOUNT_ID`: Required for associating projects with billing
-- `ORGANIZATION_ID`: Required for project creation and organization policies
+### Cost Considerations
 
-### Foundation Project
+#### AWS
+- Transit Gateway: $0.02/GB data processing + ~$36/month per attachment
+- NAT Gateway: ~$32/month per NAT Gateway + $0.045/GB data processing
+- Cost scales with number of accounts
 
-The foundation project is automatically created with a unique ID and includes:
-- Billing account association
-- All necessary Google APIs enabled
-- Shared VPC network infrastructure
-- Cloud NAT for private instance internet access
+#### GCP
+- Shared VPC: No additional cost for attachment
+- Cloud NAT: ~$45/month per NAT gateway + $0.045/GB data processing
+- Lower cost for many projects (no Transit Gateway)
 
-### Network Infrastructure
+### When to Use Which?
 
-The foundation network module creates:
-- **VPC Network**: Shared network with auto-created subnets disabled
-- **Dynamic Subnets**: Automatically generated for all environments:
-  - **sre-team-subnet**: `10.0.1.0/24` for nodes (256 IPs)
-  - **sre-team-pods-range**: `10.0.16.0/20` for pods (4,096 IPs)
-  - **sre-team-services-range**: `10.0.32.0/20` for services (4,096 IPs)
-- **Flow Logs**: Enabled for network monitoring with 5-second aggregation intervals
-- **Cloud NAT**: Provides internet access for private instances
+#### Choose AWS Architecture If:
+- ✅ Need strict account-level isolation
+- ✅ Compliance requires separate accounts
+- ✅ Need separate billing per account
+- ✅ Complex routing requirements
+- ✅ Multi-region connectivity needed
 
-### GKE Cluster
+#### Choose GCP Architecture If:
+- ✅ Simpler architecture preferred
+- ✅ Cost optimization important
+- ✅ Project-level isolation sufficient
+- ✅ Shared network acceptable
+- ✅ Easier management preferred
 
-The GKE cluster is configured with:
-- **Cluster Name**: `gke-test`
-- **Region**: `us-central1` with single zone deployment (`us-central1-a`)
-- **Private Cluster**: Private nodes with public control plane access
-- **Node Pool**: 
-  - Machine type: `e2-medium`
-  - Auto-scaling: 1-4 nodes
-  - Disk: 100GB SSD
-  - OS: Container-Optimized OS with containerd
-- **Network Features**:
-  - Uses foundation VPC network and subnet
-  - Proper secondary IP ranges for pods and services
-  - Master authorized networks: `0.0.0.0/0` (all IPs)
-- **Disabled Features**: HTTP load balancing, network policy, Istio, Cloud Run, DNS cache
-- **Enabled Features**: Horizontal pod autoscaling, auto-repair, auto-upgrade
+## AWS Landing Zone Details
 
-## Dependencies
+### Platform Landing Zone (PLZ)
 
-The infrastructure follows this dependency order:
-1. **Foundation** - Creates shared VPC network and enables APIs
-2. **SRE Team Project** - Creates environment-specific project
-3. **GKE Cluster** - Creates the Kubernetes cluster (depends on foundation network)
+The Platform Landing Zone provides foundational infrastructure and governance:
 
-## APIs Enabled
+- **Management Account**: AWS Organizations, SCPs, centralized security controls
+- **Security Account**: GuardDuty and Security Hub admin account
+- **Logging Account**: Centralized logging for CloudTrail, Config, and VPC Flow Logs
+- **Network Account**: Transit Gateway hub, shared Internet Gateway and NAT Gateways
 
-The following Google APIs are automatically enabled in the foundation project:
+### Workload Landing Zone (WLZ)
 
-- `container.googleapis.com` - Kubernetes Engine API
-- `compute.googleapis.com` - Compute Engine API
-- `iam.googleapis.com` - Identity and Access Management API
-- `cloudresourcemanager.googleapis.com` - Cloud Resource Manager API
-- `servicenetworking.googleapis.com` - Service Networking API
-- `dns.googleapis.com` - Cloud DNS API
-- `logging.googleapis.com` - Cloud Logging API
-- `monitoring.googleapis.com` - Cloud Monitoring API
+Workload accounts inherit security controls and networking from the PLZ:
 
-These APIs are required for:
-- GKE cluster creation and management
-- VPC network and subnet operations
-- Cloud NAT and routing
-- IAM service account management
-- Monitoring and logging integration
+- **SRE Account**: Development workload account
+- Future accounts can be added (e.g., production, staging)
 
-## Adding New Environments
+### Security & Governance
 
-To add a new environment:
+- **Service Control Policies (SCPs)**: Organization-wide guardrails
+  - Prevent leaving organization
+  - Require MFA
+  - Prevent disabling security services
+  - Restrict regions
+  - Enforce IAM roles only
+  - Require S3 encryption
 
-1. **Update Foundation Module**: Add the new environment to the `environments` map in `gcp/foundation/networks.tf`
-2. **Create Environment Module**: Create a new directory under `gcp/` for the environment
-3. **Configure Dependencies**: Set up terragrunt dependencies to use the foundation network
+- **Security Controls**: Organization-wide security services
+  - CloudTrail (audit logging)
+  - GuardDuty (threat detection)
+  - AWS Config (compliance monitoring)
+  - Security Hub (security findings aggregation)
 
-Example environment addition:
-```hcl
-# In gcp/foundation/networks.tf
-environments = {
-  sre-team = {
-    description = "SRE Team Environment"
-    cidr_base   = "10.0"
-  }
-  new-env = {
-    description = "New Environment"
-    cidr_base   = "10.1"
-  }
-}
-```
+For detailed AWS Landing Zone documentation, see [`aws/README.md`](aws/README.md).
 
-This will automatically generate:
-- **Primary subnet**: `new-env-subnet` with CIDR `10.1.1.0/24`
-- **Pods range**: `new-env-pods-range` with CIDR `10.1.16.0/20`
-- **Services range**: `new-env-services-range` with CIDR `10.1.32.0/20`
+## Additional Resources
 
-### CIDR Allocation Strategy
+### Official Landing Zone Documentation
+- [AWS Landing Zone Guide](https://docs.aws.amazon.com/prescriptive-guidance/latest/migration-aws-environment/building-landing-zones.html) - Official AWS guidance for building landing zones
+- [HashiCorp Validated Patterns: AWS Landing Zone](https://developer.hashicorp.com/validated-patterns/terraform/build-aws-lz-with-terraform) - HashiCorp's validated approach
+- [GCP Landing Zone Guide](https://docs.cloud.google.com/architecture/landing-zones) - Official GCP landing zone architecture documentation
 
-The system uses a predictable CIDR allocation pattern:
-- **Primary subnets**: `/24` (256 IPs) for nodes
-- **Secondary ranges**: `/20` (4,096 IPs) for pods and services
-- **Environment separation**: Each environment gets its own `10.x.x.x` range
-- **Automatic calculation**: Secondary ranges are calculated using offsets (16, 32, etc.)
+### Terraform & Tools
+- [Terragrunt Documentation](https://terragrunt.gruntwork.io/docs/)
+- [Terraform AWS Provider](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)
+- [Terraform Google Provider](https://registry.terraform.io/providers/hashicorp/google/latest/docs)
 
-For detailed CIDR planning information, see `gcp/foundation/DYNAMIC_CIDR.md`.
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Environment Variables Not Set**
-   ```
-   Error: Required environment variable BILLING_ACCOUNT_ID - not found
-   ```
-   Solution: Set the required environment variables.
-
-2. **Foundation Dependencies**
-   ```
-   Error: This object does not have an attribute named "subnet_configurations"
-   ```
-   Solution: Ensure the foundation module is deployed before dependent modules.
-
-3. **GCP Permissions**
-   ```
-   Error: Permission denied on resource project
-   ```
-   Solution: Ensure proper GCP authentication and permissions.
-
-4. **Network Dependencies**
-   ```
-   Error: Pod secondary range not found
-   ```
-   Solution: Ensure the foundation network module is deployed before GKE.
-
-### Getting Help
-
-- Check the [Terragrunt documentation](https://terragrunt.gruntwork.io/docs/)
-- Review the [Terraform Google provider documentation](https://registry.terraform.io/providers/hashicorp/google/latest/docs)
-- Check the [GKE module documentation](https://github.com/terraform-google-modules/terraform-google-kubernetes-engine)
-- Review the `gcp/foundation/DYNAMIC_CIDR.md` file for detailed CIDR allocation information
-- Check the [GCP VPC documentation](https://cloud.google.com/vpc/docs) for network best practices
-
-## Contributing
-
-1. Make changes to the Terraform configuration files
-2. Test your changes with `terragrunt plan`
-3. Apply changes with `terragrunt apply`
-4. Update documentation as needed
-5. Commit and push your changes
+### Cloud-Specific Documentation
+- [AWS Transit Gateway](https://docs.aws.amazon.com/vpc/latest/tgw/)
+- [AWS Organizations](https://docs.aws.amazon.com/organizations/latest/userguide/)
+- [GCP Shared VPC](https://cloud.google.com/vpc/docs/shared-vpc)
 
 ## License
 
-This project is licensed under the MIT License.
+MIT License

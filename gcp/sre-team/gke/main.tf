@@ -8,7 +8,7 @@ locals {
 
 module "gke" {
   source                     = "terraform-google-modules/kubernetes-engine/google//modules/beta-private-cluster"
-  version                    = "27.0.0"
+  version                    = "38.0.0"
   project_id                 = var.project_id
   name                       = "gke-test"
   region                     = "us-central1"

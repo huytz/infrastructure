@@ -76,3 +76,24 @@ output "subnet_configurations" {
     }
   }
 }
+
+# Cloud DNS outputs
+output "dns_zone_name" {
+  description = "The name of the Cloud DNS managed zone"
+  value       = google_dns_managed_zone.private.name
+}
+
+output "dns_zone_dns_name" {
+  description = "The DNS name of the Cloud DNS managed zone"
+  value       = google_dns_managed_zone.private.dns_name
+}
+
+output "dns_zone_id" {
+  description = "The ID of the Cloud DNS managed zone"
+  value       = google_dns_managed_zone.private.id
+}
+
+output "dns_name_servers" {
+  description = "The name servers for the Cloud DNS managed zone"
+  value       = google_dns_managed_zone.private.name_servers
+}
